@@ -1,16 +1,22 @@
 import pygame
 import math
 
+from pygame import transform
+import numpy as np
+
+from pygame.constants import KEYDOWN
+
 # Robot parameters
 WHEEL_DISTANCE = 130  # Distance between wheels
 ROBOT_WIDTH, ROBOT_HEIGHT = 160, 180
-SWERVE_DIAMETER = 32
+SWERVE_DIAMETER = 30
 VELOCITY_SCALAR = 1  # Velocity multiplier
-ROTATION_SCALAR = 0.8
+ROTATION_SCALAR = 0.9
 ROBOT_RADIUS = 40  # Radius of the robot representation
-SERVO_ROTATION_SPEED = 0.16 # sec/60 degrees
-MAX_SERVO_ROTATION = 300
-PIXEL_SCALAR = 10
+SERVO_ROTATION_SPEED = 0.11  # sec/60 degrees
+MAX_SERVO_ROTATION = 270
+PIXEL_SCALAR = 8
+
 
 def rotate_surface(surface, angle):
     """ Rotates a Pygame surface and resizes it to fit the new rotated dimensions. """
@@ -34,6 +40,7 @@ def rotate_surface(surface, angle):
 
     return rotated_surface
 
+
 def adjust_position(robot_x, robot_y, original_surface, rotated_surface):
     """ Adjusts the draw position to keep the rotated surface centered. """
     orig_w, orig_h = original_surface.get_size()
@@ -49,10 +56,12 @@ def adjust_position(robot_x, robot_y, original_surface, rotated_surface):
 
     return (new_x, new_y)
 
+
 def getModuleSurface(size, angle):
-    module = pygame.Surface((size, size), pygame.SRCALPHA)  # Enable transparency
+    module = pygame.Surface((size, size),
+                            pygame.SRCALPHA)  # Enable transparency
     module.fill((155, 155, 155))
-    
+
     center = size // 2
     radius = size // 2
 
@@ -78,21 +87,23 @@ def getModuleSurface(size, angle):
     # Calculate arrowhead points
     arrow_x = center + (radius - arrow_size) * math.cos(angle_rad)
     arrow_y = center + (radius - arrow_size) * math.sin(angle_rad)
-    
+
     left_x = arrow_x - arrow_size * math.cos(angle_rad - arrow_angle)
     left_y = arrow_y - arrow_size * math.sin(angle_rad - arrow_angle)
     right_x = arrow_x - arrow_size * math.cos(angle_rad + arrow_angle)
     right_y = arrow_y - arrow_size * math.sin(angle_rad + arrow_angle)
 
     # Draw the arrow
-    pygame.draw.polygon(module, (0, 255, 0), [(arrow_x, arrow_y), (left_x, left_y), (right_x, right_y)])
-    
+    pygame.draw.polygon(module, (0, 255, 0), [(arrow_x, arrow_y),
+                                              (left_x, left_y),
+                                              (right_x, right_y)])
+
     return module
 
 
 def calculate_motor_values(target_angle):
     servo_max = MAX_SERVO_ROTATION
-    
+
     if target_angle / servo_max > 1:
         target_position = (target_angle - 180) / servo_max
         motor_reversed = True
@@ -113,8 +124,6 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("2-Wheel Swerve Drive Simulation")
 clock = pygame.time.Clock()
 
-
-
 robot_x = (WIDTH // 2) - (ROBOT_WIDTH // 2)
 robot_y = (HEIGHT // 2) - (ROBOT_HEIGHT // 2)
 robot_angle = 0
@@ -126,6 +135,8 @@ x, y, stickAngle = 0, 0, 0
 robot_x, robot_y = WIDTH // 2, HEIGHT // 2  # Robot's initial position
 robot_angle = 0  # Initial angle
 
+global_transformation_matrix = np.eye(3)  # Identity matrix at the start
+
 # Initialize joystick
 joystick = None
 if pygame.joystick.get_count() > 0:
@@ -135,32 +146,62 @@ if pygame.joystick.get_count() > 0:
 running = True
 while running:
     screen.fill((30, 30, 30))  # Clear screen
-    
+
+    # resetinputs
+
     # Event handling
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-    
+
+    x = 0
+    y = 0
+    stickAngle = 0
+
     if joystick:
-        x = math.trunc(joystick.get_axis(0) * 100) / 100 # Left stick X-axis
-        y = -math.trunc(joystick.get_axis(1) * 100) / 100  # Left stick Y-axis (inverted for correct direction)
-        stickAngle = -math.trunc(joystick.get_axis(3) * 100) / 100  # Right stick X-axis
-    
+        x = math.trunc(joystick.get_axis(0) * 100) / 100  # Left stick X-axis
+        y = -math.trunc(
+            joystick.get_axis(1) *
+            100) / 100  # Left stick Y-axis (inverted for correct direction)
+        stickAngle = -math.trunc(joystick.get_axis(3) * 100) / 100
+    # Right stick X-axis
+
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_a]:
+        x -= 1
+    if keys[pygame.K_d]:
+        x += 1
+    if keys[pygame.K_w]:
+        y += 1
+    if keys[pygame.K_s]:
+        y -= 1
+    if keys[pygame.K_LEFT]:
+        stickAngle += 1
+    if keys[pygame.K_RIGHT]:
+        stickAngle -= 1
+
     # Normalize inputs
     magnitude = math.sqrt(x**2 + y**2)
     if magnitude > 1:
         x /= magnitude
         y /= magnitude
-    
+
+
+    #################################################
+    #                                               #
+    # Calculate the wheel velocity and swerve angle #
+    #                                               #
+    #################################################
+
     # Compute base wheel velocity
-    baseWheelVelocity = math.sqrt((x*10)**2 + (y*10)**2) * 0.1
-    
+    baseWheelVelocity = math.sqrt((x * 10)**2 + (y * 10)**2) * 0.1
+
     # Compute robot movement angle
     if x == 0 and y == 0:
         angle = 90
     else:
         angle = math.degrees(math.atan2(y, -x)) % 360
-    
+
     # Compute wheel velocities
     leftWheelVelocity = baseWheelVelocity - stickAngle * ROTATION_SCALAR
     rightWheelVelocity = baseWheelVelocity + stickAngle * ROTATION_SCALAR
@@ -176,7 +217,7 @@ while running:
         baseWheelVelocity = -baseWheelVelocity  # Flip movement direction
         leftWheelVelocity = -leftWheelVelocity
         rightWheelVelocity = -rightWheelVelocity
-    
+
     if (current_servo_angle < target_servo_angle):
         current_servo_angle += 60 / 60 / SERVO_ROTATION_SPEED
         if current_servo_angle > target_servo_angle:
@@ -187,75 +228,131 @@ while running:
             current_servo_angle = target_servo_angle
     else:
         current_servo_angle = target_servo_angle
-   
-    
-   # Convert angles to radians
+
+
+    #################################################
+    #                                               #
+    #      end velocity and angle calculation       #
+    #                                               #
+    #################################################
+
+    # Convert angles to radians
     servo_angle_rad = math.radians(current_servo_angle)
+    rad_global = math.radians((current_servo_angle-(robot_angle)) % 360)
     robot_angle_rad = math.radians(robot_angle)
 
-    # Compute the robot's forward movement based on wheel velocity
-    forward_velocity = (leftWheelVelocity + rightWheelVelocity) / 2
+    current = np.array(
+        [[np.cos(robot_angle_rad), -np.sin(robot_angle_rad), robot_x],
+         [np.sin(robot_angle_rad),np.cos(robot_angle_rad), robot_y], 
+         [0, 0, 1]])
 
-    # Calculate local movement relative to the robot's heading
-    local_dx = (forward_velocity * math.cos(servo_angle_rad) * VELOCITY_SCALAR * PIXEL_SCALAR)
-    local_dy = forward_velocity * math.sin(servo_angle_rad) * VELOCITY_SCALAR * PIXEL_SCALAR
+    # servo_angle_rad = robot_angle_rad - servo_angle_rad
+    # global_transformation_matrix = np.dot(current,           global_transformation_matrix)
+    # global_transformation_matrix = np.dot(current, global_transformation_matrix)
 
-    # Transform local movement into global coordinates
-    # Transform local movement into global coordinates
-    global_dx = local_dx * math.cos(robot_angle_rad) - local_dy * math.sin(robot_angle_rad)
-    global_dy = local_dx * math.sin(robot_angle_rad) + local_dy * math.cos(robot_angle_rad)
+    v_1x = (leftWheelVelocity * math.cos(servo_angle_rad))
+    v_2x = (rightWheelVelocity * math.cos(servo_angle_rad))
+
+    v_1y = (leftWheelVelocity * math.sin(servo_angle_rad))
+    v_2y = (rightWheelVelocity * math.sin(servo_angle_rad))
+
+   
+    v_trans_1x = (leftWheelVelocity * math.cos(rad_global))
+    v_trans_2x = (rightWheelVelocity * math.cos(rad_global))
+
+    v_trans_1y = (leftWheelVelocity * math.sin(rad_global))
+    v_trans_2y = (rightWheelVelocity * math.sin(rad_global))
+
+    delta_x = ((v_trans_1x + v_trans_2x) / 2) * VELOCITY_SCALAR * PIXEL_SCALAR
+    delta_y = ((v_trans_1y + v_trans_2y) / 2) * VELOCITY_SCALAR * PIXEL_SCALAR
 
 
+    r = WHEEL_DISTANCE / 2
 
-    # Compute rotational velocity based on wheel difference
-    rotational_velocity = (rightWheelVelocity - leftWheelVelocity) * (PIXEL_SCALAR * ROTATION_SCALAR) / WHEEL_DISTANCE
-    delta_angle = rotational_velocity * 180 / math.pi  # Convert to degrees
+    delta_angle = ((((v_2y - v_1y) * r) - ((v_2x - v_1x) * r)) /
+                   ((r**2) + (r**2))) * ROTATION_SCALAR * PIXEL_SCALAR
+
+    print(v_1x)
+    print(v_2x)
+
+    trans_angle = np.array([[np.cos(delta_angle), -np.sin(delta_angle), 0],
+                      [np.sin(delta_angle), np.cos(delta_angle), 0], 
+                      [0, 0, 1]])
+
+    trans = np.array([
+        [1, 0, delta_x],
+        [0, 1, delta_y],
+        [0, 0, 1]
+    ])
+
+    final =  trans @ (current @ trans_angle)
+
+
 
     # Update position and angle
-    robot_x += global_dx
-    robot_y += global_dy
+    robot_x = final[0, 2]
+    robot_y = final[1, 2]
+    robot_angle = math.degrees(np.arctan2(final[1, 0], final[0, 0])) % 360
 
-    robot_angle += delta_angle
-    robot_angle %= 360
-
+    # Draw robot
     robot = pygame.Surface((ROBOT_WIDTH, ROBOT_HEIGHT))
     robot.fill((200, 200, 200))
 
-    pygame.draw.line(robot, (30,255,30), (0,ROBOT_HEIGHT-3), (ROBOT_WIDTH, ROBOT_HEIGHT-3), 6)
+    pygame.draw.line(robot, (30, 255, 30), (0, ROBOT_HEIGHT - 3),
+                     (ROBOT_WIDTH, ROBOT_HEIGHT - 3), 6)
 
     moduleLeft = getModuleSurface(SWERVE_DIAMETER, current_servo_angle)
     moduleRight = getModuleSurface(SWERVE_DIAMETER, current_servo_angle)
 
-    robot.blit(moduleLeft, ( (ROBOT_WIDTH//2)-(WHEEL_DISTANCE//2) - (moduleLeft.get_width()//2), ((ROBOT_HEIGHT//2) - (moduleLeft.get_width()//2))))
-    robot.blit(moduleRight, ( (ROBOT_WIDTH//2)+(WHEEL_DISTANCE//2) - (moduleRight.get_width()//2), ((ROBOT_HEIGHT//2) - (moduleRight.get_width()//2))))
+    robot.blit(moduleLeft,
+               ((ROBOT_WIDTH // 2) - (WHEEL_DISTANCE // 2) -
+                (moduleLeft.get_width() // 2),
+                ((ROBOT_HEIGHT // 2) - (moduleLeft.get_width() // 2))))
+    robot.blit(moduleRight,
+               ((ROBOT_WIDTH // 2) + (WHEEL_DISTANCE // 2) -
+                (moduleRight.get_width() // 2),
+                ((ROBOT_HEIGHT // 2) - (moduleRight.get_width() // 2))))
 
     robot_rotated = rotate_surface(robot, robot_angle)
-    screen.blit(robot_rotated, adjust_position(robot_x, robot_y, robot, robot_rotated))
+    screen.blit(robot_rotated,
+                adjust_position(robot_x, robot_y, robot, robot_rotated))
 
     # Display information
     font = pygame.font.Font(None, 18)
+    robot_x_text = font.render(f"robot x: {robot_x:.2f}", True, (255, 255, 255))
+    robot_y_text = font.render(f"robot y: {robot_y:.2f}", True, (255, 255, 255))
     angle_text = font.render(f"Angle: {angle:.2f}", True, (255, 255, 255))
-    lw_text = font.render(f"Left Wheel power: {leftWheelVelocity:.2f}", True, (255, 255, 255))
-    rw_text = font.render(f"Right Wheel power: {rightWheelVelocity:.2f}", True, (255, 255, 255))
+    lw_text = font.render(f"Left Wheel power: {leftWheelVelocity:.2f}", True,
+                          (255, 255, 255))
+    rw_text = font.render(f"Right Wheel power: {rightWheelVelocity:.2f}", True,
+                          (255, 255, 255))
     y_text = font.render(f"x: {x:.2f}", True, (255, 255, 255))
     x_text = font.render(f"y: {y:.2f}", True, (255, 255, 255))
-    stickAngle_text = font.render(f"Stick angle: {stickAngle:.2f}", True, (255, 255, 255))
-    targetAngle_text = font.render(f"Target angle: {target_servo_angle:.2f}", True, (255, 255, 255))
-    currentAngle_text = font.render(f"Current angle: {current_servo_angle:.2f}", True, (255, 255, 255))
-    motorReversed_text = font.render(f"Motor reversed: {calculate_motor_values(angle)[1]}", True, (255, 255, 255))
-    robotHeading_text = font.render(f"Robot heading: {robot_angle:.2f}", True, (255, 255, 255))
-    
-    screen.blit(robotHeading_text, (10, HEIGHT-200))
-    screen.blit(motorReversed_text, (10, HEIGHT-180))
-    screen.blit(targetAngle_text, (10, HEIGHT-160))
-    screen.blit(currentAngle_text, (10, HEIGHT-140))
-    screen.blit(angle_text, (10, HEIGHT-120))
-    screen.blit(lw_text, (10, HEIGHT-100))
-    screen.blit(rw_text, (10, HEIGHT-80))
-    screen.blit(y_text, (10, HEIGHT-60))
-    screen.blit(x_text, (10, HEIGHT-40))
-    screen.blit(stickAngle_text, (10, HEIGHT-20))
-    
+    stickAngle_text = font.render(f"Stick angle: {stickAngle:.2f}", True,
+                                  (255, 255, 255))
+    targetAngle_text = font.render(f"Target angle: {target_servo_angle:.2f}",
+                                   True, (255, 255, 255))
+    currentAngle_text = font.render(
+        f"Current angle: {current_servo_angle:.2f}", True, (255, 255, 255))
+    motorReversed_text = font.render(
+        f"Motor reversed: {calculate_motor_values(angle)[1]}", True,
+        (255, 255, 255))
+    robotHeading_text = font.render(f"Robot heading: {robot_angle:.2f}", True,
+                                    (255, 255, 255))
+
+    screen.blit(robot_x_text, (10, HEIGHT - 240))
+    screen.blit(robot_y_text, (10, HEIGHT - 220))
+    screen.blit(robotHeading_text, (10, HEIGHT - 200))
+    screen.blit(motorReversed_text, (10, HEIGHT - 180))
+    screen.blit(targetAngle_text, (10, HEIGHT - 160))
+    screen.blit(currentAngle_text, (10, HEIGHT - 140))
+    screen.blit(angle_text, (10, HEIGHT - 120))
+    screen.blit(lw_text, (10, HEIGHT - 100))
+    screen.blit(rw_text, (10, HEIGHT - 80))
+    screen.blit(y_text, (10, HEIGHT - 60))
+    screen.blit(x_text, (10, HEIGHT - 40))
+    screen.blit(stickAngle_text, (10, HEIGHT - 20))
+
     pygame.display.flip()
     clock.tick(60)
 
